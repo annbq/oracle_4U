@@ -1,1 +1,943 @@
+On PRIMARY:
+
+[oracle@adgholad1-90316 ~]$ sqlplus /nolog
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Sun Jun 30 09:51:26 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+SQL> conn /as sysdba
+Connected.
+SQL> alter user sys identified by c0mPl3xPa55_4U#;
+
+User altered.
+
+SQL> show pdbs;
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       READ ONLY  NO
+         3 MYPDB                          READ WRITE NO
+SQL> alter session set container=mypdb;
+
+Session altered.
+
+SQL> create user test identified by c0mPl3xPa55_4U# quota unlimited on users default tablespace users;
+
+User created.
+
+SQL> grant create session,create table to test;
+
+Grant succeeded.
+
+SQL> grant execute on sys.dbms_lock to test;
+
+Grant succeeded.
+
+
++++++++++++Create MYPDB_PROD service ON MYPDB:
+
+
+SQL> conn /as sysdba
+Connected.
+SQL> show pdbs
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       READ ONLY  NO
+         3 MYPDB                          READ WRITE NO
+SQL> alter session set container=MYPDB;
+
+Session altered.
+
+
+SQL> exec DBMS_SERVICE.CREATE_SERVICE('MYPDB_PROD','MYPDB_PROD');
+
++++ Enable TAC for service MYPDB_PROD +++
+
+DECLARE
+   params dbms_service.svc_parameter_array;
+BEGIN
+   params('FAILOVER_TYPE'):='AUTO';
+   params('FAILOVER_METHOD'):=DBMS_SERVICE.FAILOVER_METHOD_BASIC;
+   params('REPLAY_INITIATION_TIMEOUT'):=1800;
+   params('RETENTION_TIMEOUT'):=86400;
+   params('FAILOVER_DELAY'):=10;
+   params('FAILOVER_RETRIES'):=30;
+   params('DRAIN_TIMEOUT'):=60;
+   params('commit_outcome'):='true';
+   params('aq_ha_notifications'):='true';
+   params('STOP_OPTION'):=DBMS_SERVICE.STOP_OPTION_IMMEDIATE;
+   params('SESSION_STATE_CONSISTENCY'):='AUTO';
+   params('FAILOVER_RESTORE'):='AUTO';
+   DBMS_SERVICE.MODIFY_SERVICE('MYPDB_PROD',params);
+END;
+
+Start service:
+
+SQL> exec DBMS_SERVICE.START_SERVICE('MYPDB_PROD');
+
+
+
++++++++ Create STARTUP TRIGGER ON MYPDB:
+
+
+SQL> conn /as sysdba
+Connected.
+SQL> show pdbs
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       READ ONLY  NO
+         3 MYPDB                          READ WRITE NO
+SQL> alter session set container=MYPDB;
+
+Session altered.
+
+------
+
+create or replace trigger primary_services
+ after startup on database
+ declare
+ role varchar2(30);
+ omode varchar2(30);
+ begin
+ select database_role into role from v$database;
+ select open_mode into omode from v$pdbs where name = 'MYPDB';
+ if role = 'PRIMARY' then
+ if omode != 'READ WRITE' then
+ execute immediate 'alter pluggable database MYPDB open';
+ end if;
+ dbms_service.start_service('MYPDB_PROD');
+end if;
+ end;
+
+SQL> create or replace trigger primary_services
+ after startup on database
+ declare
+ role varchar2(30);
+  2    3    4    5   omode varchar2(30);
+ begin
+  6    7   select database_role into role from v$database;
+ select open_mode into omode from v$pdbs where name = 'MYPDB';
+ if role = 'PRIMARY' then
+ if omode != 'READ WRITE' then
+ execute immediate 'alter pluggable database MYPDB open';
+ end if;
+ dbms_s  8  ervice.start_service('MYPDB_PROD');
+end if;
+ end;  
+ 16  /
+
+Trigger created.
+
+
+On CLIENT: Create TNS with Faiover option: 
++++ 
+tnsnames.ora 
+# Add this entry 
+MYPDB_PROD=
+(DESCRIPTION=
+  (CONNECT_TIMEOUT=120)
+  (TRANSPORT_CONNECT_TIMEOUT=4)
+  (RETRY_COUNT=50)
+  (RETRY_DELAY=3)
+  (ADDRESS_LIST=
+    (FAILOVER = ON)(LOAD_BALANCE = OFF)
+    (ADDRESS=(PROTOCOL=TCP)(HOST=10.0.0.245)(PORT=1521))
+    (ADDRESS=(PROTOCOL=TCP)(HOST=10.0.0.226)(PORT=1521)))
+  (CONNECT_DATA=
+    (SERVICE_NAME=mypdb_prod.pub.ll90316vcn.oraclevcn.com)
+  ))
+  
+  
+####
+
+
+
+
+ON STANDBY: 
+
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxAvailability
+  Members:
+  DGHOL_bs2_iad - Primary database
+    DGHOL_jb4_iad - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 10 seconds ago)
+
+
+ON PRIMARY: ====>>>> Service "mypdb_prod.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+
+[oracle@adgholad1-91058 ~]$ lsnrctl status
+
+  Instance "DGHOL", status UNKNOWN, has 1 handler(s) for this service...
+Service "mypdb.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "mypdb_prod.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+The command completed successfully
+
+ON STANDBY: =====>>> Do not have mypdb_prod.pub.ll91058vcn.oraclevcn.com
+
+[oracle@vmadgholad2-91058 ~]$ lsnrctl status
+
+Services Summary...
+Service "DGHOLXDB.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_CFG.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_jb4_iad.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_jb4_iad_DGMGRL.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status UNKNOWN, has 1 handler(s) for this service...
+Service "mypdb.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+The command completed successfully
+
+
++++ Let start to test TAC +++
+
+ON Client :
+[oracle@adgholad1-90316 admin]$ sqlplus  test/c0mPl3xPa55_4U#@MYPDB_PROD
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Sun Jun 30 10:03:02 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+Last Successful login time: Sun Jun 30 2024 10:00:37 +00:00
+
+Connected to:
+Oracle Database 19c EE Extreme Perf Release 19.0.0.0.0 - Production
+Version 19.23.0.0.0
+
+SQL> create table test_tab (test_col varchar2(100));
+
+Table created.
+
+begin
+		for i in 1..120 loop
+			insert into test_tab values ('test '|| i);
+			dbms_lock.sleep(1);
+		end loop;
+		commit;
+end;
+/ 
+
+ON PRIMARY: Switch Over to STandby DB 
+
+
+
+DGMGRL> switchover to DGHOL_jb4_iad
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_jb4_iad"
+Connecting ...
+Connected to "DGHOL_jb4_iad"
+Connected as SYSDBA.
+New primary database "DGHOL_jb4_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_bs2_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_bs2_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_jb4_iad"
+
+On Client: App still runing until finished.
+SQL> begin
+                for i in 1..60 loop
+                        insert into test_tab values ('test second time'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;  2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+
+ON STANDBY: Check Service existing: Service "mypdb_prod.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+
+
+[oracle@vmadgholad2-91058 ~]$ lsnrctl status
+
+LSNRCTL for Linux: Version 19.0.0.0.0 - Production on 07-JUL-2024 06:50:01
+
+Copyright (c) 1991, 2024, Oracle.  All rights reserved.
+
+Connecting to (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=vmadgholad2-91058.pub.ll91058vcn.oraclevcn.com)(PORT=1521)))
+STATUS of the LISTENER
+------------------------
+Alias                     LISTENER
+Version                   TNSLSNR for Linux: Version 19.0.0.0.0 - Production
+Start Date                06-JUL-2024 12:16:28
+Uptime                    0 days 18 hr. 33 min. 32 sec
+Trace Level               off
+Security                  ON: Local OS Authentication
+SNMP                      OFF
+Listener Parameter File   /u01/app/oracle/product/19.0.0/dbhome_1/network/admin/listener.ora
+Listener Log File         /u01/app/oracle/diag/tnslsnr/vmadgholad2-91058/listener/alert/log.xml
+Listening Endpoints Summary...
+  (DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=vmadgholad2-91058.pub.ll91058vcn.oraclevcn.com)(PORT=1521)))
+  (DESCRIPTION=(ADDRESS=(PROTOCOL=ipc)(KEY=EXTPROC1521)))
+Services Summary...
+Service "15eb4e2183461eafe0636108f40acb6c.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOLXDB.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_CFG.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_jb4_iad.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "DGHOL_jb4_iad_DGMGRL.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status UNKNOWN, has 1 handler(s) for this service...
+Service "mypdb.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+Service "mypdb_prod.pub.ll91058vcn.oraclevcn.com" has 1 instance(s).
+  Instance "DGHOL", status READY, has 1 handler(s) for this service...
+The command completed successfully
+
+
+SQL> conn /as sysdba
+Connected.
+SQL> select username from v$session where type='USER';
+
+USERNAME
+--------------------------------------------------------------------------------
+SYS
+PUBLIC
+TEST
+SYS
+SYS
+
+===> Session TEST is transfered to Standby ( new primary )
+
+
+
++++++ Switcover to OLD Primary +++++
+
+
+DGMGRL> switchover to DGHOL_bs2_iad
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_bs2_iad"
+Connecting ...
+Connected to "DGHOL_bs2_iad"
+Connected as SYSDBA.
+New primary database "DGHOL_bs2_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_jb4_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_jb4_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_bs2_iad"
+
+
+++++ TAC with FSFO ++++
+
+==> Protection MAXAVAILABILITY
+
+
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxAvailability
+  Members:
+  DGHOL_bs2_iad - Primary database
+    DGHOL_jb4_iad - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 4 seconds ago)
+
+
+DGMGRL> edit database DGHOL_bs2_iad set property FastStartFailoverTarget = DGHOL_jb4_iad ;
+Property "faststartfailovertarget" updated
+DGMGRL> edit database DGHOL_jb4_iad set property FastStartFailoverTarget = DGHOL_bs2_iad ;
+Property "faststartfailovertarget" updated
+DGMGRL>
+
+DGMGRL> edit configuration set property ObserverReconnect=120;
+Property "observerreconnect" updated
+
+
+DGMGRL> edit database DGHOL_bs2_iad set property FastStartFailoverTarget = DGHOL_jb4_iad ;
+Property "faststartfailovertarget" updated
+DGMGRL> edit database DGHOL_jb4_iad set property FastStartFailoverTarget = DGHOL_bs2_iad ;
+Property "faststartfailovertarget" updated
+DGMGRL>  edit configuration set property ObserverReconnect=120;
+Property "observerreconnect" updated
+DGMGRL> show fast_start failover
+
+Fast-Start Failover:  Disabled
+
+  Protection Mode:    MaxAvailability
+  Lag Limit:          30 seconds
+  Lag Type:           APPLY
+
+  Threshold:          30 seconds
+  Active Target:      (none)
+  Potential Targets:  "dghol_jb4_iad"
+    DGHOL_jb4_iad valid
+  Observer:           (none)
+  Shutdown Primary:   TRUE
+  Auto-reinstate:     TRUE
+  Observer Reconnect: 120 seconds
+  Observer Override:  FALSE
+  Lag Grace Time:     0 seconds
+
+Configurable Failover Conditions
+  Health Conditions:
+    Corrupted Controlfile          YES
+    Corrupted Dictionary           YES
+    Inaccessible Logfile            NO
+    Stuck Archiver                  NO
+    Datafile Write Errors          YES
+
+  Oracle Error Conditions:
+    (none)
+
+DGMGRL>  show observer
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+Fast-Start Failover: DISABLED
+
+No observers.
+
+DGMGRL>  show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxAvailability
+  Members:
+  DGHOL_bs2_iad - Primary database
+    DGHOL_jb4_iad - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 18 seconds ago)
+
+
+DGMGRL> enable fast_start failover
+Enabled in Zero Data Loss Mode.
+DGMGRL> show fast_start failover
+
+Fast-Start Failover: Enabled in Zero Data Loss Mode
+
+  Protection Mode:    MaxAvailability
+  Lag Limit:          30 seconds (not in use)
+  Lag Type:           APPLY
+
+  Threshold:          30 seconds
+  Active Target:      DGHOL_jb4_iad
+  Potential Targets:  "dghol_jb4_iad"
+    DGHOL_jb4_iad valid
+  Observer:           adgholad1-91058
+  Shutdown Primary:   TRUE
+  Auto-reinstate:     TRUE
+  Observer Reconnect: 120 seconds
+  Observer Override:  FALSE
+  Lag Grace Time:     0 seconds
+
+Configurable Failover Conditions
+  Health Conditions:
+    Corrupted Controlfile          YES
+    Corrupted Dictionary           YES
+    Inaccessible Logfile            NO
+    Stuck Archiver                  NO
+    Datafile Write Errors          YES
+
+  Oracle Error Conditions:
+    (none)
+
+
++++ Start OBSERVER +++
+
+DGMGRL> START OBSERVER
+Succeeded in opening the observer file "/home/oracle/fsfo_adgholad1-91058.dat".
+[W000 2024-07-07T06:56:34.027+00:00] FSFO target standby is (empty)
+Observer 'adgholad1-91058' started
+The observer log file is '/home/oracle/observer_adgholad1-91058.log'.
+/home/oracle/observer_adgholad1-91058.log
+
+
+
+++++ Testing FSFO ++++
+
+[oracle@adgholad1-90316 admin]$ sqlplus -ac test/c0mPl3xPa55_4U#@MYPDB_PROD
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Mon Jul 1 02:42:22 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+Last Successful login time: Sun Jun 30 2024 11:41:37 +00:00
+
+Connected to:
+Oracle Database 19c EE Extreme Perf Release 19.0.0.0.0 - Production
+Version 19.23.0.0.0
+
+begin
+		for i in 1..120 loop
+			insert into test_tab values ('test '|| i);
+			dbms_lock.sleep(1);
+		end loop;
+		commit;
+end;
+
+
+ON PRIMARY: Kill pmon
+[oracle@adgholad1-91058 ~]$ ps -ef | grep pmon
+oracle    6249     1  0 06:46 ?        00:00:00 ora_pmon_DGHOL
+oracle   14813 12367  0 06:59 pts/2    00:00:00 grep --color=auto pmon
+[oracle@adgholad1-91058 ~]$ kill -9 6249
+
+
+++ Check Observer Log: Fast-Start Failover started...
+
+[oracle@adgholad1-91058 ~]$ tail -100f /home/oracle/observer_adgholad1-91058.log
+
+
+Unable to connect to database using DGHOL_bs2_iad
+[W000 2024-07-07T07:00:28.902+00:00] Primary database cannot be reached.
+[W000 2024-07-07T07:00:28.902+00:00] Fast-Start Failover threshold has expired.
+[W000 2024-07-07T07:00:28.902+00:00] Try to connect to the standby.
+[W000 2024-07-07T07:00:28.902+00:00] Check if the standby is ready for failover.
+[P001 2024-07-07T07:00:28.907+00:00] Failed to attach to DGHOL_bs2_iad.
+ORA-12514: TNS:listener does not currently know of service requested in connect descriptor
+
+Unable to connect to database using DGHOL_bs2_iad
+[S002 2024-07-07T07:00:28.913+00:00] Fast-Start Failover started...
+
+2024-07-07T07:00:28.913+00:00
+Initiating Fast-Start Failover to database "DGHOL_jb4_iad"...
+[S002 2024-07-07T07:00:28.914+00:00] Initiating Fast-start Failover.
+Performing failover NOW, please wait...
+Failover succeeded, new primary is "DGHOL_jb4_iad"
+2024-07-07T07:00:58.482+00:00
+[S002 2024-07-07T07:00:58.482+00:00] Fast-Start Failover finished...
+[W000 2024-07-07T07:00:58.482+00:00] Failover succeeded. Restart pinging.
+[W000 2024-07-07T07:00:58.500+00:00] Primary database has changed to DGHOL_jb4_iad.
+[W000 2024-07-07T07:00:58.506+00:00] Try to connect to the primary.
+[W000 2024-07-07T07:00:58.506+00:00] Try to connect to the primary DGHOL_jb4_iad.
+[W000 2024-07-07T07:00:59.180+00:00] The standby DGHOL_bs2_iad needs to be reinstated
+[W000 2024-07-07T07:00:59.180+00:00] Try to connect to the new standby DGHOL_bs2_iad.
+[S006 2024-07-07T07:00:59.187+00:00] Failed to attach to DGHOL_bs2_iad.
+ORA-12514: TNS:listener does not currently know of service requested in connect descriptor
+
+Unable to connect to database using DGHOL_bs2_iad
+[W000 2024-07-07T07:02:44.363+00:00] Try to connect to the new standby DGHOL_bs2_iad.
+[S006 2024-07-07T07:02:44.367+00:00] Failed to attach to DGHOL_bs2_iad.
+ORA-12528: TNS:listener: all appropriate instances are blocking new connections
+
+Unable to connect to database using DGHOL_bs2_iad
+[W000 2024-07-07T07:02:59.388+00:00] Reconnect interval expired, connecting to primary database.
+[W000 2024-07-07T07:02:59.389+00:00] Try to connect to the new standby DGHOL_bs2_iad.
+[W000 2024-07-07T07:03:00.395+00:00] Connection to the new standby restored!
+[W000 2024-07-07T07:03:00.395+00:00] Reconnecting to primary succeeded.
+[W000 2024-07-07T07:03:02.396+00:00] Try to connect to the primary DGHOL_jb4_iad.
+[W000 2024-07-07T07:03:03.402+00:00] Connection to the primary restored!
+[W000 2024-07-07T07:03:04.402+00:00] Wait for new primary to be ready to reinstate.
+[W000 2024-07-07T07:03:05.402+00:00] New primary is now ready to reinstate.
+[W000 2024-07-07T07:03:05.402+00:00] Issuing REINSTATE command.
+
+2024-07-07T07:03:05.402+00:00
+Initiating reinstatement for database "DGHOL_bs2_iad"...
+Reinstating database "DGHOL_bs2_iad", please wait...
+[W000 2024-07-07T07:03:29.457+00:00] The standby DGHOL_bs2_iad is ready to be a FSFO target
+
+
+[oracle@adgholad1-91058 ~]$
+
+
+ON OLD PRIMARY: start db to reinstate auto
+
+SQL> conn /as sysdba
+Connected to an idle instance.
+SQL> startup mount
+ORACLE instance started.
+
+Total System Global Area 1.4496E+10 bytes
+Fixed Size                  9194760 bytes
+Variable Size            1912602624 bytes
+Database Buffers         1.2415E+10 bytes
+Redo Buffers              158576640 bytes
+Database mounted.
+SQL>
+
+
+On CLIENT: Job still running until finished 
+
+SQL> begin
+                for i in 1..90 loop
+                        insert into test_tab values ('Manual FailOver'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;  2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+
+
+++++ Switch Back to OLD Primary:
+
+
+DGMGRL> connect sys/c0mPl3xPa55_4U#
+Connected to "DGHOL_bs2_iad"
+Connected as SYSDBA.
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxAvailability
+  Members:
+  DGHOL_jb4_iad - Primary database
+    DGHOL_bs2_iad - (*) Physical standby database
+
+Fast-Start Failover: Enabled in Zero Data Loss Mode
+
+Configuration Status:
+SUCCESS   (status updated 51 seconds ago)
+
+DGMGRL> switchover to DGHOL_bs2_iad
+Performing switchover NOW, please wait...
+New primary database "DGHOL_bs2_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_jb4_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_jb4_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_bs2_iad"
+
+
++++ MANUAL FAILOVER +++
+
+
+DGMGRL> failover to DGHOL_jb4_iad
+Performing failover NOW, please wait...
+Error: ORA-16600: not connected to target standby database for failover
+
+Failed.
+Unable to failover
+DGMGRL>
+DGMGRL> connect sys/c0mPl3xPa55_4U#@DGHOL_jb4_iad
+Connected to "DGHOL_jb4_iad"
+Connected as SYSDBA.
+DGMGRL> failover to DGHOL_jb4_iad
+Performing failover NOW, please wait...
+Failover succeeded, new primary is "dghol_jb4_iad"
+DGMGRL>
+
+
+SQL> conn /as sysdba
+Connected to an idle instance.
+SQL> startup mount
+ORACLE instance started.
+
+Total System Global Area 1.4496E+10 bytes
+Fixed Size                  9194760 bytes
+Variable Size            1912602624 bytes
+Database Buffers         1.2415E+10 bytes
+Redo Buffers              158576640 bytes
+Database mounted.
+
+
+===> OLD Primary Auto Reinstate 
+
+ON CLIENT:
+[oracle@adgholad1-91058 ~]$ sqlplus -ac test/c0mPl3xPa55_4U#@MYPDB_PROD
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Sun Jul 7 07:13:07 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+Last Successful login time: Sun Jul 07 2024 07:13:05 +00:00
+
+Connected to:
+Oracle Database 19c EE Extreme Perf Release 19.0.0.0.0 - Production
+Version 19.23.0.0.0
+
+SQL>  begin
+                for i in 1..90 loop
+                        insert into test_tab values ('Manual FailOver'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;  2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+SQL>
+
+
+
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxAvailability
+  Members:
+  DGHOL_jb4_iad - Primary database
+    DGHOL_bs2_iad - (*) Physical standby database
+
+Fast-Start Failover: Enabled in Zero Data Loss Mode
+
+Configuration Status:
+SUCCESS   (status updated 5 seconds ago)
+
+
+
+
+
+++++ MAX Performance ++++
+
+DGMGRL> edit database DGHOL_jb4_iad set property LogXptMode = ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit database DGHOL_bs2_iad set property LogXptMode = ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit configuration set protection mode as maxperformance;
+Error: ORA-16654: fast-start failover is enabled
+
+Failed.
+DGMGRL> edit database DGHOL_jb4_iad set property LogXptMode = SYNC;
+Property "logxptmode" updated
+DGMGRL> edit database DGHOL_bs2_iad set property LogXptMode =SYNC;
+Property "logxptmode" updated
+DGMGRL> disable fast_start failover
+Disabled.
+DGMGRL>
+DGMGRL> stop observer
+Observer stopped.
+DGMGRL>
+DGMGRL> edit database DGHOL_jb4_iad set property LogXptMode = ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit database DGHOL_bs2_iad set property LogXptMode = ASYNC;
+Property "logxptmode" updated
+DGMGRL> edit configuration set protection mode as maxperformance;
+Succeeded.
+
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxPerformance
+  Members:
+  DGHOL_bs2_iad - Primary database
+    DGHOL_jb4_iad - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 3 seconds ago)
+
+
++++ TEST TAC with MAX Performance +++
+
+On Client:
+
+begin
+		for i in 1..90 loop
+			insert into test_tab values ('Max Perf '|| i);
+			dbms_lock.sleep(1);
+		end loop;
+		commit;
+end;
+
+
+ON PRIMARY:
+
+DGMGRL> switchover to DGHOL_jb4_iad
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_jb4_iad"
+Connecting ...
+Connected to "DGHOL_jb4_iad"
+Connected as SYSDBA.
+New primary database "DGHOL_jb4_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_bs2_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_bs2_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_jb4_iad"
+
+
+On Client:
+
+SQL> begin
+                for i in 1..90 loop
+                        insert into test_tab values ('Max Perf - Manual FO'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;  2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+
++++ MANUAL FAILOVER ++++
+DGMGRL> switchover to DGHOL_bs2_iad
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_bs2_iad"
+Connecting ...
+Connected to "DGHOL_bs2_iad"
+Connected as SYSDBA.
+New primary database "DGHOL_bs2_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_jb4_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_jb4_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_bs2_iad"
+
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxPerformance
+  Members:
+  DGHOL_bs2_iad - Primary database
+    DGHOL_jb4_iad - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 9 seconds ago)
+
+DGMGRL> connect sys/c0mPl3xPa55_4U#@DGHOL_jb4_iad
+Connected to "DGHOL_jb4_iad"
+Connected as SYSDBA.
+DGMGRL> failover to DGHOL_jb4_iad
+Performing failover NOW, please wait...
+Failover succeeded, new primary is "dghol_jb4_iad"
+DGMGRL>
+
+
+ON Client:
+
+SQL> begin
+                for i in 1..90 loop
+                        insert into test_tab values ('Max Perf - FSFO'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;   2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+
++++ REinstate OLD PRIMARY ++++
+DGMGRL>  connect sys/c0mPl3xPa55_4U#@DGHOL_jb4_iad
+Connected to "DGHOL_JB4_IAD"
+Connected as SYSDBA.
+DGMGRL> reinstate database DGHOL_bs2_iad
+Reinstating database "dghol_bs2_iad", please wait...
+Reinstatement of database "dghol_bs2_iad" succeeded
+DGMGRL>
+
+
+++ 
+
+DGMGRL> switchover to DGHOL_bs2_iad
+Performing switchover NOW, please wait...
+New primary database "DGHOL_bs2_iad" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_jb4_iad"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_jb4_iad"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_bs2_iad"
+
+
+DGMGRL> enable fast_start failover
+Enabled in Potential Data Loss Mode.
+DGMGRL> show configuration
+
+Configuration - DGHOL_bs2_iad_DGHOL_jb4_iad
+
+  Protection Mode: MaxPerformance
+  Members:
+  DGHOL_bs2_iad - Primary database
+    Warning: ORA-16819: fast-start failover observer not started
+
+    DGHOL_jb4_iad - (*) Physical standby database
+
+Fast-Start Failover: Enabled in Potential Data Loss Mode
+
+Configuration Status:
+WARNING   (status updated 40 seconds ago)
+
+DGMGRL> start observer
+Succeeded in opening the observer file "/home/oracle/fsfo_adgholad1-91058.dat".
+[W000 2024-07-07T07:46:29.994+00:00] FSFO target standby is DGHOL_jb4_iad
+Observer 'adgholad1-91058' started
+The observer log file is '/home/oracle/observer_adgholad1-91058.log'.
+
+
+ON CLIENT:
+Connected to:
+Oracle Database 19c EE Extreme Perf Release 19.0.0.0.0 - Production
+Version 19.23.0.0.0
+
+SQL> begin
+                for i in 1..90 loop
+                        insert into test_tab values ('Max Perf - FSFO'|| i);
+                        dbms_lock.sleep(1);
+                end loop;
+                commit;
+end;  2    3    4    5    6    7
+  8  /
+
+PL/SQL procedure successfully completed.
+
+
+
+ON Primary:
+
+[oracle@adgholad1-91058 ~]$ ps -ef | grep pmon
+oracle   36689     1  0 07:38 ?        00:00:00 ora_pmon_DGHOL
+oracle   41355 36176  0 07:47 pts/2    00:00:00 grep --color=auto pmon
+[oracle@adgholad1-91058 ~]$ kill -9 36689
+
+
+===>  Auto Reinstate 
+SQL> conn /as sysdba
+Connected to an idle instance.
+SQL> startup mount
+ORACLE instance started.
+
+Total System Global Area 1.4496E+10 bytes
+Fixed Size                  9194760 bytes
+Variable Size            1912602624 bytes
+Database Buffers         1.2415E+10 bytes
+Redo Buffers              158576640 bytes
+Database mounted.
+
 
