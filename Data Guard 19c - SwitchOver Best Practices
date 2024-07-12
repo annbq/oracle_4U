@@ -1,0 +1,464 @@
+Switchover in Oracle DataGuard 19c
+
+
+Primary:146.235.214.4  DGHOL_bp3_sjc
+Standby: 129.159.36.84 DGHOL_v2m_sjc
+
+
++++ Verify Switchover Readiness
+
+
+alter database switchover to DGHOL_v2m_sjc verify
+
+SQL> alter database switchover to DGHOL_v2m_sjc verify;
+alter database switchover to DGHOL_v2m_sjc verify
+*
+ERROR at line 1:
+ORA-16475: succeeded with warnings, check alert log for more details
+
+SWITCHOVER VERIFY: Send VERIFY request to switchover target DGHOL_V2M_SJC
+2024-06-26T03:38:47.986682+00:00
+SWITCHOVER VERIFY WARNING: switchover target has no standby database defined in LOG_ARCHIVE_DEST_n parameter. 
+If the switchover target is converted to a primary database, the new primary database will not be protected.
+ORA-16475 signalled during: alter database switchover to DGHOL_v2m_sjc verify...
+
+
+===> This is just a warning because log_archive_dest_2 in not configured on standby database pointing to primary.
+
+ON STANDBY:
+SQL> alter system set log_archive_dest_2='service=DGHOL_bp3_sjc ASYNC NOAFFIRM db_unique_name=DGHOL_bp3_sjc valid_for=(online_logfile,all_roles)';
+
+System altered.
+
+
+
+alter system set log_archive_dest_2='service=DGHOL_bp3_sjc ASYNC NOAFFIRM db_unique_name=DGHOL_bp3_sjc valid_for=(online_logfile,all_roles)';
+
+
+ON PRIMARY:
+
+SQL> conn /as sysdba
+Connected.
+SQL> alter database switchover to DGHOL_v2m_sjc verify;
+
+Database altered.
+
+
+alter database switchover to DGHOL_v2m_sjc verify
+2024-06-26T03:43:41.140513+00:00
+SWITCHOVER VERIFY: Send VERIFY request to switchover target DGHOL_V2M_SJC
+2024-06-26T03:43:41.625913+00:00
+SWITCHOVER VERIFY COMPLETE: READY FOR SWITCHOVER
+Completed: alter database switchover to DGHOL_v2m_sjc verify
+
+
+
+++++ Initiate the Switchover
+
+alter database switchover to DGHOL_v2m_sjc;
+
+[oracle@adgholad1-89896 ~]$ sqlplus /nolog
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Wed Jun 26 03:45:19 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+SQL> conn /as sysdba
+Connected.
+SQL> alter database switchover to DGHOL_v2m_sjc;
+
+Database altered.
+
+
+alter database switchover to DGHOL_v2m_sjc
+2024-06-26T03:45:23.879843+00:00
+.... (PID:63535): The Time Management Interface (TMI) is being enabled for role transition
+.... (PID:63535): information.  This will result in messages beingoutput to the alert log
+.... (PID:63535): file with the prefix 'TMI: '.  This is being enabled to make the timing of
+.... (PID:63535): the various stages of the role transition available for diagnostic purposes.
+.... (PID:63535): This output will end when the role transition is complete.
+TMI: dbsdrv switchover to target BEGIN 2024-06-26 03:45:23.880515
+NET  (PID:63535): Starting switchover [Process ID: 63535]
+TMI: kcv_switchover_to_target convert to physical BEGIN 2024-06-26 03:45:24.732683
+2024-06-26T03:45:24.732842+00:00
+ALTER DATABASE COMMIT TO SWITCHOVER TO PHYSICAL STANDBY [Process Id: 63535] (DGHOL)
+NET  (PID:63535): Waiting for target standby to receive all redo
+2024-06-26T03:45:24.745523+00:00
+NET  (PID:63535): Waiting for all non-current ORLs to be archived
+2024-06-26T03:45:24.745674+00:00
+NET  (PID:63535): All non-current ORLs have been archived
+2024-06-26T03:45:24.745811+00:00
+NET  (PID:63535): Waiting for all FAL entries to be archived
+2024-06-26T03:45:24.745934+00:00
+NET  (PID:63535): All FAL entries have been archived
+2024-06-26T03:45:24.746080+00:00
+NET  (PID:63535): Waiting for LAD:2 to become synchronized
+2024-06-26T03:45:25.751371+00:00
+NET  (PID:63535): Active, synchronized Physical Standby switchover target has been identified
+NET  (PID:63535): Preventing updates and queries at the Primary
+NET  (PID:63535): Generating and shipping final logs to target standby
+Switchover End-Of-Redo Log thread 1 sequence 8 has been fixed
+Switchover: Primary highest seen SCN set to 0x000000000029f00c
+NET  (PID:63535): Noswitch archival of T-1.S-8
+NET  (PID:63535): End-Of-Redo Branch archival of T-1.S-8
+NET  (PID:63535): LGWR is scheduled to archive to LAD:2 after log switch
+NET  (PID:63535): Archiving is disabled due to current logfile archival
+Primary will check for some target standby to have received all redo
+NET  (PID:63535): Waiting for target standby to apply all redo
+2024-06-26T03:45:26.784833+00:00
+Backup controlfile written to trace file /u01/app/oracle/diag/rdbms/dghol_bp3_sjc/DGHOL/trace/DGHOL_ora_63535.trc
+NET  (PID:63535): Converting the primary database to a new standby database
+Clearing standby activation ID 4136833484 (0xf69311cc)
+The primary database controlfile was created using the
+'MAXLOGFILES 16' clause.
+There is space for up to 13 standby redo logfiles
+Use the following SQL commands on the standby database to create
+standby redo logfiles that match the primary database:
+ALTER DATABASE ADD STANDBY LOGFILE 'srl1.f' SIZE 1073741824;
+ALTER DATABASE ADD STANDBY LOGFILE 'srl2.f' SIZE 1073741824;
+ALTER DATABASE ADD STANDBY LOGFILE 'srl3.f' SIZE 1073741824;
+ALTER DATABASE ADD STANDBY LOGFILE 'srl4.f' SIZE 1073741824;
+Archivelog for thread 1 sequence 8 required for standby recovery
+Offline data file 5 marked as online during convert to standby or switchover to standby.
+Restore of backup may be required if the file is not physically accessible.
+Offline data file 6 marked as online during convert to standby or switchover to standby.
+Restore of backup may be required if the file is not physically accessible.
+Offline data file 8 marked as online during convert to standby or switchover to standby.
+Restore of backup may be required if the file is not physically accessible.
+Switchover: Primary controlfile converted to standby controlfile succesfully.
+Switchover: Complete - Database shutdown required
+TMI: kcv_switchover_to_target convert to physical END 2024-06-26 03:45:26.812779
+NET  (PID:63535): Sending request(convert to primary database) to switchover target DGHOL_V2M_SJC
+2024-06-26T03:45:43.569709+00:00
+NET  (PID:63535): Switchover complete. Database shutdown required
+USER (ospid: 63535): terminating the instance
+2024-06-26T03:45:44.658808+00:00
+Instance terminated by USER, pid = 63535
+TMI: dbsdrv switchover to target END 2024-06-26 03:45:44.658841
+Completed: alter database switchover to DGHOL_v2m_sjc
+Shutting down ORACLE instance (abort) (OS id: 63535)
+Shutdown is initiated by sqlplus@adgholad1-89896 (TNS V1-V3).
+License high water mark = 32
+2024-06-26T03:45:44.687766+00:00
+Instance shutdown complete (OS id: 63535)
+
+
+
++++ Open the Standby as Primary
+
+SQL> conn /as sysdba
+Connected.
+SQL>
+SQL>
+SQL> show pdbs
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       MOUNTED
+         3 MYPDB                          MOUNTED
+SQL>
+SQL> alter database open
+  2  ;
+
+Database altered.
+
+SQL> show pdbs
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       READ ONLY  NO
+         3 MYPDB                          READ WRITE NO
+
+
+
++++ Start Recovery in Primary
+SQL> conn /as sysdba
+Connected to an idle instance.
+SQL> startup mount
+ORACLE instance started.
+
+Total System Global Area 1.4496E+10 bytes
+Fixed Size                  9194760 bytes
+Variable Size            1912602624 bytes
+Database Buffers         1.2415E+10 bytes
+Redo Buffers              158576640 bytes
+Database mounted.
+SQL> alter database recover managed standby database disconnect from session;
+
+Database altered.
+
+
+
++++ Validate New Database Roles
+
+SQL> select name,open_mode,database_role,switchover_status from v$database ;
+
+NAME      OPEN_MODE            DATABASE_ROLE    SWITCHOVER_STATUS
+--------- -------------------- ---------------- --------------------
+DGHOL     MOUNTED              PHYSICAL STANDBY TO PRIMARY
+
+
+SQL> select name,open_mode,database_role,switchover_status from v$database ;
+
+NAME      OPEN_MODE            DATABASE_ROLE    SWITCHOVER_STATUS
+--------- -------------------- ---------------- --------------------
+DGHOL     READ WRITE           PRIMARY          FAILED DESTINATION
+
+
+
+SQL> alter system switch logfile;
+
+System altered.
+
+SQL> select name, open_mode, database_role, switchover_status from v$database ;
+
+NAME      OPEN_MODE            DATABASE_ROLE    SWITCHOVER_STATUS
+--------- -------------------- ---------------- --------------------
+DGHOL     READ WRITE           PRIMARY          TO STANDBY
+
+
+
+
+
+
+++++ Dataguard Oracle 12.2: Keeping Physical Standby Sessions Connected During Role Transition ++++
+STANDBY_DB_PRESERVE_STATES 
+
+
+
+
+
+
+ON PRIMARY:
+
+[oracle@adgholad1-89896 ~]$ sqlplus /nolog
+
+SQL*Plus: Release 19.0.0.0.0 - Production on Wed Jun 26 04:17:18 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2023, Oracle.  All rights reserved.
+
+SQL> conn /as sysdba
+Connected.
+SQL> alter user sys identified by c0mPl3xPa55_4U# ;
+
+User altered.
+
+
+SQL> create user c##u1 identified by c0mPl3xPa55_4U# container=all;
+
+User created.
+
+SQL> grant connect, select any table to c##u1;
+
+Grant succeeded.
+
+
+ON STANDBY:
+
+SQL> conn c##u1/c0mPl3xPa55_4U#
+Connected.
+
+
+ON PRIMARY:
+[oracle@adgholad1-89896 ~]$ dgmgrl
+DGMGRL for Linux: Release 19.0.0.0.0 - Production on Wed Jun 26 04:17:40 2024
+Version 19.23.0.0.0
+
+Copyright (c) 1982, 2019, Oracle and/or its affiliates.  All rights reserved.
+
+Welcome to DGMGRL, type "help" for information.
+DGMGRL> connect sys/c0mPl3xPa55_4U#
+Connected to "DGHOL_bp3_sjc"
+Connected as SYSDBA.
+DGMGRL>
+DGMGRL> show configuration
+
+Configuration - DGHOL_bp3_sjc_DGHOL_v2m_sjc
+
+  Protection Mode: MaxPerformance
+  Members:
+  DGHOL_bp3_sjc - Primary database
+    DGHOL_v2m_sjc - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 10 seconds ago)
+
+DGMGRL>
+DGMGRL>
+DGMGRL> validate database DGHOL_bp3_sjc
+
+  Database Role:    Primary database
+
+  Ready for Switchover:  Yes
+
+  Managed by Clusterware:
+    DGHOL_bp3_sjc:  NO
+    Validating static connect identifier for the primary database DGHOL_bp3_sjc...
+    The static connect identifier allows for a connection to database "DGHOL_bp3_sjc".
+
+DGMGRL> validate database DGHOL_v2m_sjc
+
+  Database Role:     Physical standby database
+  Primary Database:  DGHOL_bp3_sjc
+
+  Ready for Switchover:  Yes
+  Ready for Failover:    Yes (Primary Running)
+
+  Managed by Clusterware:
+    DGHOL_bp3_sjc:  NO
+    DGHOL_v2m_sjc:  NO
+    Validating static connect identifier for the primary database DGHOL_bp3_sjc...
+    The static connect identifier allows for a connection to database "DGHOL_bp3_sjc".
+
+DGMGRL> switchover to DGHOL_v2m_sjc;
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_v2m_sjc"
+Connecting ...
+Connected to "DGHOL_v2m_sjc"
+Connected as SYSDBA.
+New primary database "DGHOL_v2m_sjc" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_bp3_sjc"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_bp3_sjc"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_v2m_sjc"
+
+
+ON STANDBY:
+SQL> select 1 from dua;
+select 1 from dua
+*
+ERROR at line 1:
+ORA-03135: connection lost contact
+Process ID: 72625
+Session ID: 166 Serial number: 8491
+
+
+
+++++
+
+ON STANDBY:
+
+SQL>  alter system set standby_db_preserve_states=all scope=spfile;
+
+System altered.
+
+SQL> shutdown immediate
+Database closed.
+Database dismounted.
+ORACLE instance shut down.
+SQL> startup
+ORACLE instance started.
+
+Total System Global Area 1.4496E+10 bytes
+Fixed Size                  9194760 bytes
+Variable Size            1912602624 bytes
+Database Buffers         1.2415E+10 bytes
+Redo Buffers              158576640 bytes
+Database mounted.
+Database opened.
+SQL> show pdbs
+
+    CON_ID CON_NAME                       OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+         2 PDB$SEED                       READ ONLY  NO
+         3 MYPDB                          MOUNTED
+SQL>
+SQL> alter pluggable database all open;
+
+Pluggable database altered.
+
+SQL>
+
+SQL> conn c##u1/c0mPl3xPa55_4U#
+Connected.
+SQL>  select 1 from dual;
+
+         1
+----------
+         1
+
+
+ON PRIMARY:
+
+
+Welcome to DGMGRL, type "help" for information.
+DGMGRL> connect sys/c0mPl3xPa55_4U#
+Connected to "DGHOL_v2m_sjc"
+Connected as SYSDBA.
+DGMGRL> show configuration
+
+Configuration - DGHOL_bp3_sjc_DGHOL_v2m_sjc
+
+  Protection Mode: MaxPerformance
+  Members:
+  DGHOL_v2m_sjc - Primary database
+    DGHOL_bp3_sjc - Physical standby database
+
+Fast-Start Failover:  Disabled
+
+Configuration Status:
+SUCCESS   (status updated 54 seconds ago)
+
+DGMGRL> validate database  DGHOL_v2m_sjc
+
+  Database Role:    Primary database
+
+  Ready for Switchover:  Yes
+
+  Managed by Clusterware:
+    DGHOL_v2m_sjc:  NO
+    Validating static connect identifier for the primary database DGHOL_v2m_sjc.                                                                                                                                                                                                                                             ..
+    The static connect identifier allows for a connection to database "DGHOL_v2m                                                                                                                                                                                                                                             _sjc".
+
+DGMGRL> validate database DGHOL_bp3_sjc
+
+  Database Role:     Physical standby database
+  Primary Database:  DGHOL_v2m_sjc
+
+  Ready for Switchover:  Yes
+  Ready for Failover:    Yes (Primary Running)
+
+  Managed by Clusterware:
+    DGHOL_v2m_sjc:  NO
+    DGHOL_bp3_sjc:  NO
+    Validating static connect identifier for the primary database DGHOL_v2m_sjc.                                                                                                                                                                                                                                             ..
+    The static connect identifier allows for a connection to database "DGHOL_v2m                                                                                                                                                                                                                                             _sjc".
+
+DGMGRL> switchover to DGHOL_bp3_sjc
+Performing switchover NOW, please wait...
+Operation requires a connection to database "DGHOL_bp3_sjc"
+Connecting ...
+Connected to "DGHOL_bp3_sjc"
+Connected as SYSDBA.
+New primary database "DGHOL_bp3_sjc" is opening...
+Operation requires start up of instance "DGHOL" on database "DGHOL_v2m_sjc"
+Starting instance "DGHOL"...
+Connected to an idle instance.
+ORACLE instance started.
+Connected to "DGHOL_v2m_sjc"
+Database mounted.
+Database opened.
+Switchover succeeded, new primary is "dghol_bp3_sjc"
+
+
+ON STANDY:
+
+SQL> select 2 from dual;
+
+         2
+----------
+         2
+
+SQL>
+
+
+
+
